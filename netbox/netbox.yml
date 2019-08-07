@@ -1,11 +1,9 @@
 netbox:
     main:
-        api_url: 'http://localhost/api/'
-        # Uncomment this if you need support for virtual machines
-        #virtualization: true
-        # Uncomment this if you want your devices to also be grouped by tags
-        #tag_hack: true
-        #api_token: ''
+        api_url: 'http://0.0.0.0:32769/api/dcim/devices/'
+        api_interfaces_url: 'http://0.0.0.0:32769/api/dcim/interfaces/'
+        api_ipam_url: 'http://0.0.0.0:32769/api/ipam/ip-addresses/'
+        api_token: '0123456789abcdef0123456789abcdef01234567'
 
     # How servers will be grouped.
     # If no group specified here, inventory script will return all servers.
@@ -13,8 +11,8 @@ netbox:
         # Default section in Netbox.
         default:
             - device_role
-            - rack
-            - platform
+            - tags
+            - site
         # Custom sections (custom_fields) could be used.
         #custom:
         #    - env
@@ -30,3 +28,5 @@ netbox:
         # Custom sections (custom_fields) could be used as vars too.
         #custom:
         #    env: env
+        additional:    
+            interface_ip: true 

@@ -79,11 +79,14 @@ class NetboxAsInventory(object):
         # Script configuration.
         self.script_config = script_config_data
         self.api_url = self._config(["main", "api_url"])
+        self.api_ipam_url = self._config(["main", "api_ipam_url"])
+        self.api_interfaces_url = self._config(["main", "api_interfaces_url"])
         self.api_token = self._config(["main", "api_token"], default="", optional=True)
         self.virtualization = self._config(["main", "virtualization"], default=False, optional=True)
         self.tag_hack = self._config(["main", "tag_hack"], default=False, optional=True)
         self.group_by = self._config(["group_by"], default={})
         self.hosts_vars = self._config(["hosts_vars"], default={})
+        self.add_interface_ip =  self._config(["hosts_vars", "additional", "interface_ip"], default=None)
 
         # Get value based on key.
         self.key_map = {
@@ -154,6 +157,69 @@ class NetboxAsInventory(object):
         return key_value
 
     @staticmethod
+    def get_device_interfaces(device_id, api_url, api_token=None):
+        '''Retrieves davice data from netbox API
+
+        Returns:
+            List with interface IDs assosated with the device
+        '''
+        api_url_headers = {}
+        api_url_params = {}
+
+        api_url_params.update({"device_id": device_id})
+
+        if api_token:
+            api_url_headers.update({"Authorization": "Token %s" % api_token})
+
+        interface_ids = []
+        while api_url:
+            # Get hosts list.
+            api_output = requests.get(api_url, params=api_url_params, headers=api_url_headers)
+
+            # Check that a request is 200 and not something else like 404, 401, 500 ... etc.
+            api_output.raise_for_status()
+
+            # Get api output data.
+            api_output_data = api_output.json()
+
+            if isinstance(api_output_data, dict) and "results" in api_output_data:
+                results = api_output_data["results"]
+                for interface in results:
+                    interface_ids.append(interface['id'])
+                api_url = api_output_data["next"]
+        return interface_ids
+
+
+    @staticmethod
+    def get_interface_ip(interface_id, api_url, api_token=None):
+        '''Retrieves interface data from netbox API
+
+        Returns:
+            A dictionary with `interface_name : interface_ip` mapping
+        '''
+        api_url_headers = {}
+        api_url_params = {}
+
+        api_url_params.update({"interface_id": interface_id})
+
+        if api_token:
+            api_url_headers.update({"Authorization": "Token %s" % api_token})
+
+         # Get interface ip.
+        api_output = requests.get(api_url, params=api_url_params, headers=api_url_headers)
+
+        # Check that a request is 200 and not something else like 404, 401, 500 ... etc.
+        api_output.raise_for_status()
+
+        # Get api output data.
+        api_output_data = api_output.json()
+
+        if isinstance(api_output_data, dict) and "results" in api_output_data:
+            results = api_output_data["results"][0]
+            return {results['interface']['name']: results['address'].split('/')[0]}
+        return None
+
+    @staticmethod
     def get_hosts_list(api_url, api_token=None, specific_host=None):
         """Retrieves hosts list from netbox API.
 
@@ -212,12 +278,19 @@ class NetboxAsInventory(object):
         # The value could be None/null.
         if server_name and group_value:
             # If the group not in the inventory it will be add.
-            if group_value not in inventory_dict:
-                inventory_dict.update({group_value: []})
+            if type(group_value) == list: # For tags
+                for tag in group_value:
+                    if tag not in inventory_dict:
+                        inventory_dict.update({tag: []})
+                    if tag not in inventory_dict[tag]:
+                        inventory_dict[tag].append(server_name)    
+            else:    
+                if group_value not in inventory_dict:
+                    inventory_dict.update({group_value: []})
 
             # If the host not in the group it will be add.
-            if server_name not in inventory_dict[group_value]:
-                inventory_dict[group_value].append(server_name)
+                if server_name not in inventory_dict[group_value]:
+                    inventory_dict[group_value].append(server_name)
         return inventory_dict
 
     def add_host_to_inventory(self, groups_categories, inventory_dict, host_data):
@@ -352,27 +425,39 @@ class NetboxAsInventory(object):
             inventory_dict.update({host_name: host_vars})
         return inventory_dict
 
+    def add_interface_meta_vars(self, current_host, host_vars):
+        """ Adds interfaces information to host_vars dict
+
+        Returns updated host_vars
+        """
+        current_host_id = current_host['id']
+        interfaces = self.get_device_interfaces(current_host_id, self.api_interfaces_url, self.api_token)
+        for interface_id in interfaces:
+            interface = self.get_interface_ip(interface_id, self.api_ipam_url, self.api_token)
+            host_vars.update(interface)
+        return host_vars
+
+
     def generate_inventory(self):
         """Generate Ansible dynamic inventory.
 
         Returns:
             A dict has inventory with hosts and their vars.
         """
-
+        
         inventory_dict = dict()
-        endpoints = ["dcim/devices/"]
-        if self.virtualization:
-            endpoints.append("virtualization/virtual-machines/")
-        # Generate this outside of the loop, so we don't overwrite it.
-        inventory_dict.update({"_meta": {"hostvars": {}}})
-        for endpoint in endpoints:
-            netbox_hosts_list = self.get_hosts_list(self.api_url+endpoint, self.api_token, self.host)
-            if netbox_hosts_list:
-                for current_host in netbox_hosts_list:
-                    server_name = current_host.get("name")
-                    self.add_host_to_inventory(self.group_by, inventory_dict, current_host)
-                    host_vars = self.get_host_vars(current_host, self.hosts_vars)
-                    inventory_dict = self.update_host_meta_vars(inventory_dict, server_name, host_vars)
+        netbox_hosts_list = self.get_hosts_list(self.api_url, self.api_token, self.host)
+
+        if netbox_hosts_list:
+            inventory_dict.update({"_meta": {"hostvars": {}}})
+            for current_host in netbox_hosts_list:
+                server_name = current_host.get("name")
+                self.add_host_to_inventory(self.group_by, inventory_dict, current_host)
+                self.hosts_vars.pop("additional", None)
+                host_vars = self.get_host_vars(current_host, self.hosts_vars)
+                if self.add_interface_ip:
+                    host_vars = self.add_interface_meta_vars(current_host, host_vars)   
+                inventory_dict = self.update_host_meta_vars(inventory_dict, server_name, host_vars)
         return inventory_dict
 
     def print_inventory_json(self, inventory_dict):
