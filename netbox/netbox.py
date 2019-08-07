@@ -444,7 +444,7 @@ class NetboxAsInventory(object):
         Returns:
             A dict has inventory with hosts and their vars.
         """
-https://github.com/KI-labs/netbox-as-ansible-inventory/pull/1/conflict?name=netbox%252Fnetbox.yml&ancestor_oid=ec86312f18771d6d8ab5376e5f67c7e5309f951e&base_oid=dec352823ddab441b63c57d9d79c7e56871102e8&head_oid=90153c9f68aeba7d1854848d55e438552371aa6a
+        
         inventory_dict = dict()
         netbox_hosts_list = self.get_hosts_list(self.api_url, self.api_token, self.host)
 
