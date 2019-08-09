@@ -82,6 +82,8 @@ class NetboxAsInventory(object):
         self.api_ipam_url = self._config(["main", "api_ipam_url"])
         self.api_interfaces_url = self._config(["main", "api_interfaces_url"])
         self.api_token = self._config(["main", "api_token"], default="", optional=True)
+        self.virtualization = self._config(["main", "virtualization"], default=False, optional=True)
+        self.tag_hack = self._config(["main", "tag_hack"], default=False, optional=True)
         self.group_by = self._config(["group_by"], default={})
         self.hosts_vars = self._config(["hosts_vars"], default={})
         self.add_interface_ip =  self._config(["hosts_vars", "additional", "interface_ip"], default=None)
@@ -313,6 +315,12 @@ class NetboxAsInventory(object):
             "custom": host_data.get("custom_fields")
         }
 
+        ## Little hack to support tag grouping.
+        if self.tag_hack:
+            group_tags = host_data.get("tags")
+            for tag in group_tags:
+                    inventory_dict = self.add_host_to_group(server_name, tag, inventory_dict)
+
         if groups_categories:
             # There are 2 categories that will be used to group hosts.
             # One for default section in netbox, and another for "custom_fields" which are being defined by netbox user.
@@ -325,12 +333,15 @@ class NetboxAsInventory(object):
                     for group in groups_categories[category]:
                         # Try to get group value. If the section not found in netbox, this also will print error message.
                         if data_dict:
-                            group_value = self._get_value_by_path(data_dict, [group, key_name])
+                            group_value = self._get_value_by_path(data_dict, [group, key_name], ignore_key_error=True)
+                            if not group_value and group == "device_role":
+                                group = "role"
+                                group_value = self._get_value_by_path(data_dict, [group, key_name])
 
                             if group_value:
                                 inventory_dict = self.add_host_to_group(server_name, group_value, inventory_dict)
                             # If any groups defined in "group_by" section, but host is not part of that group, it will go to catch-all group.
-                            else:
+                            elif server_name:
                                 self._put_host_to_ungrouped(inventory_dict, server_name)
                 # If any category defined but no groups in "group_by" section, the host will go to catch-all group.
                 else:
@@ -382,7 +393,7 @@ class NetboxAsInventory(object):
                     # This is because "custom_fields" has more than 1 type.
                     # Values inside "custom_fields" could be a key:value or a dict.
                     if isinstance(data_dict.get(var_data), dict):
-                        var_value = self._get_value_by_path(data_dict, [var_data, key_name], ignore_key_error=True)
+                        var_value = self._get_value_by_path(data_dict, [var_data, key_name], ignore_key_error=False)
                     else:
                         var_value = data_dict.get(var_data)
 
@@ -433,7 +444,7 @@ class NetboxAsInventory(object):
         Returns:
             A dict has inventory with hosts and their vars.
         """
-
+        
         inventory_dict = dict()
         netbox_hosts_list = self.get_hosts_list(self.api_url, self.api_token, self.host)
 
