@@ -341,7 +341,7 @@ class NetboxAsInventory(object):
                             if group_value:
                                 inventory_dict = self.add_host_to_group(server_name, group_value, inventory_dict)
                             # If any groups defined in "group_by" section, but host is not part of that group, it will go to catch-all group.
-                            else:
+                            elif server_name:
                                 self._put_host_to_ungrouped(inventory_dict, server_name)
                 # If any category defined but no groups in "group_by" section, the host will go to catch-all group.
                 else:
